@@ -1,0 +1,15 @@
+flask
+opencv-python
+numpy
+pyyaml
+torch
+torchvision
+scikit-image
+pillow
+requests
+matplotlib
+ftfy
+regex
+tqdm
+git+https://github.com/openai/CLIP.git
+pygame

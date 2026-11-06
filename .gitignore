@@ -1,0 +1,11 @@
+.idea/
+.ipynb_checkpoints/*
+__pycache__
+
+
+
+detections/
+detections.db
+*.pyc
+.env
+venv/

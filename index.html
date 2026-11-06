@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Violence Detection</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Body Background Pulse */
+        @keyframes alarm-pulse {
+            0% { background-color: #7f1d1d; } 
+            50% { background-color: #ef4444; } 
+            100% { background-color: #7f1d1d; } 
+        }
+        .alarm-active {
+            animation: alarm-pulse 1s infinite ease-in-out;
+        }
+        body { transition: background-color 0.5s; }
+
+        /* Video Overlay Pulse */
+        .violence-overlay {
+            position: absolute;
+            inset: 0; 
+            border: 8px solid rgba(255, 0, 0, 0.9);
+            background-color: rgba(255, 0, 0, 0.3); 
+            pointer-events: none; 
+            display: none;
+            z-index: 50; 
+        }
+        
+        .alarm-active .violence-overlay {
+            display: block;
+            animation: pulse-border 0.5s infinite;
+        }
+
+        @keyframes pulse-border {
+            0% { opacity: 1; border-color: red; }
+            50% { opacity: 0.5; border-color: darkred; }
+            100% { opacity: 1; border-color: red; }
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="bg-slate-900 text-white font-sans h-screen flex flex-col">
+
+    <div id="startOverlay" class="fixed inset-0 z-[200] bg-slate-900/90 flex flex-col items-center justify-center backdrop-blur-md">
+        <button id="startBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-full text-xl shadow-lg transition transform hover:scale-105">
+            CLICK TO ENABLE AUDIO & MONITORING
+        </button>
+        <p class="mt-4 text-slate-400">Browser policy requires interaction to play alarms.</p>
+    </div>
+
+    <header class="p-6 border-b border-slate-700 bg-slate-800 flex justify-center">
+        <h1 class="text-3xl font-bold tracking-widest uppercase text-blue-400">Violence Detection System</h1>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <aside class="w-1/4 border-r border-slate-700 flex flex-col bg-slate-900 z-20">
+            <div class="p-6 border-b border-slate-700">
+                <h2 class="text-xl font-semibold text-blue-300 mb-3">Status</h2>
+                <div id="statusIndicator" class="rounded-lg flex items-center justify-center h-16 text-2xl font-bold bg-slate-800 text-slate-500 border border-slate-600">
+                    MONITORING
+                </div>
+            </div>
+
+            <div class="p-6 flex-1 overflow-y-auto">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-xl font-semibold text-blue-300">Detection Log</h2>
+                    <span class="text-xs text-slate-500" id="logCount">0 Events</span>
+                </div>
+                <div id="fileList" class="space-y-2 text-xs"></div>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col p-6 bg-slate-950/50 relative">
+            <div class="flex-1 bg-black rounded-xl border-2 border-slate-800 relative flex items-center justify-center overflow-hidden">
+                <div class="violence-overlay"></div> 
+                <div class="absolute top-4 left-4 bg-red-600 px-3 py-1 rounded text-sm font-bold animate-pulse z-40 shadow-lg">
+                    LIVE FEED
+                </div>
+                <img src="/video_feed" class="w-full h-full object-cover z-10" alt="Live Stream">
+            </div>
+        </main>
+    </div>
+
+    <div id="mediaModal" class="fixed inset-0 z-[100] hidden bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="relative max-w-5xl w-full bg-slate-800 rounded-xl overflow-hidden shadow-2xl border border-slate-600 flex flex-col">
+            <div class="flex justify-between items-center p-4 bg-slate-900 border-b border-slate-700">
+                <h3 class="text-lg font-bold text-white">Evidence Review</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white hover:bg-red-600 rounded-lg p-2 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            
+            <div id="modalContent" class="flex items-center justify-center bg-black h-[60vh] p-2">
+            </div>
+        </div>
+    </div>
+
+    <audio id="alarmAudio" src="warning-alarm.wav" preload="auto" loop></audio>
+
+    <script>
+        const alarm = document.getElementById('alarmAudio');
+        const statusInd = document.getElementById('statusIndicator');
+        const fileList = document.getElementById('fileList');
+        const logCount = document.getElementById('logCount');
+        const modal = document.getElementById('mediaModal');
+        const modalContent = document.getElementById('modalContent');
+        const startOverlay = document.getElementById('startOverlay');
+        const startBtn = document.getElementById('startBtn');
+        
+        let wasViolence = false;
+        let monitoringActive = false;
+
+        let lastViolenceTime = 0;
+
+        // --- UNLOCK AUDIO CONTEXT ---
+        startBtn.addEventListener('click', () => {
+            // This click allows the browser to play audio later
+            alarm.play().then(() => {
+                alarm.pause();
+                alarm.currentTime = 0;
+            }).catch(e => console.log("Audio permission error:", e));
+
+            startOverlay.style.display = 'none';
+            monitoringActive = true;
+        });
+
+        // --- MODAL FUNCTIONS ---
+        function openModal(type, filename) {
+            modal.classList.remove('hidden');
+            if (type === 'image') {
+                modalContent.innerHTML = `<img src="/download/${filename}" class="max-h-full max-w-full object-contain rounded">`;
+            } else {
+                modalContent.innerHTML = `
+                    <video controls autoplay class="max-h-full max-w-full rounded border border-slate-700">
+                        <source src="/download/${filename}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>`;
+            }
+        }
+
+        function closeModal() {
+            modal.classList.add('hidden');
+            modalContent.innerHTML = ''; // Stop video playback
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === "Escape") closeModal();
+        });
+
+        // --- HISTORY & STATUS ---
+        async function updateHistory() {
+            try {
+                const res = await fetch('/get_history');
+                const data = await res.json();
+                
+                logCount.innerText = `${data.incidents.length} Events`;
+
+                fileList.innerHTML = data.incidents.map(inc => `
+                    <div class="p-3 bg-slate-800 rounded border-l-4 border-red-500 mb-2 shadow-md hover:bg-slate-700 transition">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="font-bold text-red-400 text-sm uppercase">${inc[2]}</span>
+                            <span class="text-[10px] text-slate-500">${inc[1].split(' ')[1]}</span>
+                        </div>
+                        <div class="flex gap-3 mt-2 text-xs">
+                            <button onclick="openModal('image', '${inc[4]}')" class="text-blue-400 hover:text-white underline decoration-blue-400/30">View Photo</button>
+                            <span class="text-slate-600">|</span>
+                            <button onclick="openModal('video', '${inc[5]}')" class="text-blue-400 hover:text-white underline decoration-blue-400/30">Watch Video</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        // --- MAIN LOOP ---
+        setInterval(async () => {
+            // DO NOT RUN UNTIL USER CLICKS START
+            if (!monitoringActive) return;
+
+            try {
+                const response = await fetch('/check_violence');
+                const data = await response.json();
+                
+                // --- NEW LOGIC START ---
+                const now = Date.now();
+
+                // 1. If violence is detected right now, update the "last seen" time
+                if (data.violence) {
+                    lastViolenceTime = now;
+                }
+
+                // 2. We keep the alarm ON if:
+                //    A. Violence is currently happening
+                //    OR
+                //    B. It has been less than 2000ms (2 seconds) since violence stopped
+                const alarmShouldBeOn = data.violence || (now - lastViolenceTime < 2000);
+
+                if (alarmShouldBeOn) {
+                    // Play Audio & Show Red Screen
+                    if (alarm.paused) { 
+                        alarm.play().catch(e => console.log("Audio Play Error:", e)); 
+                    }
+                    document.body.classList.add('alarm-active');
+                    statusInd.innerText = "FIGHTING DETECTED";
+                    statusInd.className = "rounded-lg flex items-center justify-center h-16 text-2xl font-bold bg-red-600 text-white animate-pulse border-4 border-red-800 shadow-[0_0_20px_rgba(255,0,0,0.5)]";
+                } else {
+                    // Stop Audio & Green Screen
+                    if (!alarm.paused) { alarm.pause(); alarm.currentTime = 0; }
+                    document.body.classList.remove('alarm-active');
+                    statusInd.innerText = "MONITORING";
+                    statusInd.className = "rounded-lg flex items-center justify-center h-16 text-2xl font-bold bg-slate-800 text-slate-500 border border-slate-600";
+                }
+                // --- NEW LOGIC END ---
+
+                wasViolence = data.violence;
+
+            } catch (e) { console.log("Connecting..."); }
+        }, 500);
+
+        // Update History separately every 2 seconds to catch new files after recording finishes
+        setInterval(updateHistory, 2000);
+        
+        updateHistory();
+    </script>
+</body>
+</html>
